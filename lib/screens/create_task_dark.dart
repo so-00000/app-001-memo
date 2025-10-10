@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../db/memo_database.dart';
 import '../models/memo.dart';
+import '../services/memo_service.dart';
 
-/// メモ作成画面（旧 AddNewTaskDark）
+/// 📝 メモ作成画面（旧 AddNewTaskDark）
 class CreateTaskDark extends StatefulWidget {
   const CreateTaskDark({super.key});
 
@@ -11,8 +11,8 @@ class CreateTaskDark extends StatefulWidget {
 }
 
 class _CreateTaskDarkState extends State<CreateTaskDark> {
-  // 入力内容を管理するコントローラ
   final TextEditingController _controller = TextEditingController();
+  final MemoService _memoService = MemoService(); // ✅ Service層経由でDB操作
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +22,10 @@ class _CreateTaskDarkState extends State<CreateTaskDark> {
         child: Column(
           children: [
             Expanded(child: TaskInputArea(controller: _controller)),
-            CreateMemoButton(controller: _controller),
+            CreateMemoButton(
+              controller: _controller,
+              memoService: _memoService,
+            ),
           ],
         ),
       ),
@@ -31,12 +34,12 @@ class _CreateTaskDarkState extends State<CreateTaskDark> {
 
   @override
   void dispose() {
-    _controller.dispose(); // メモリリーク防止
+    _controller.dispose();
     super.dispose();
   }
 }
 
-/// メモ入力欄
+/// ✏️ メモ入力欄
 class TaskInputArea extends StatelessWidget {
   final TextEditingController controller;
   const TaskInputArea({super.key, required this.controller});
@@ -74,10 +77,16 @@ class TaskInputArea extends StatelessWidget {
   }
 }
 
-/// メモ作成ボタン
+/// 🚀 メモ作成ボタン
 class CreateMemoButton extends StatelessWidget {
   final TextEditingController controller;
-  const CreateMemoButton({super.key, required this.controller});
+  final MemoService memoService;
+
+  const CreateMemoButton({
+    super.key,
+    required this.controller,
+    required this.memoService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -94,44 +103,22 @@ class CreateMemoButton extends StatelessWidget {
         onPressed: () async {
           final text = controller.text.trim();
           if (text.isEmpty) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('メモ内容を入力してください'),
-                backgroundColor: Colors.redAccent,
-                behavior: SnackBarBehavior.floating,
-                margin: EdgeInsets.only(
-                  bottom: 70,
-                  left: 16,
-                  right: 16,
-                ),
-              ),
-            );
+            _showSnackBar(context, 'メモ内容を入力してください', Colors.redAccent);
             return;
           }
 
-          await MemoDatabase.instance.insertMemo(
+          // ✅ 新規メモ作成（Service経由）
+          await memoService.insertMemo(
             Memo(
               content: text,
-              status: MemoStatusList.values[0], // デフォルト「未完了」
-              createdAt: DateTime.now(),
+              statusId: 1, // 「未完了」のid
+              createdAt: DateTime.now(), // ✅ DateTime型で保持
             ),
           );
 
           if (!context.mounted) return;
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('メモを保存しました！'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.only(
-                bottom: 70,
-                left: 16,
-                right: 16,
-              ),
-            ),
-          );
-
+          _showSnackBar(context, 'メモを保存しました！', Colors.green);
           controller.clear();
         },
         child: const Text(
@@ -142,6 +129,18 @@ class CreateMemoButton extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
+      ),
+    );
+  }
+
+  /// ✅ SnackBar共通処理
+  void _showSnackBar(BuildContext context, String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 70, left: 16, right: 16),
       ),
     );
   }

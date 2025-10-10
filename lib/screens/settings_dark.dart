@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../constants/status_color_mapper.dart';
+import '../constants/status_codes.dart';
+import '../db/database_helper.dart';
 
 /// 設定画面（Darkモード専用）
 class SettingsDark extends StatefulWidget {
@@ -10,18 +13,147 @@ class SettingsDark extends StatefulWidget {
 
 class _SettingsDarkState extends State<SettingsDark> {
   String _displayMode = 'auto';
-  final List<Map<String, dynamic>> _statusList = [
-    {'name': 'Done', 'color': const Color(0xFF00B894)},
-    {'name': 'In Progress', 'color': const Color(0xFF4E94F8)},
-    {'name': 'To Do', 'color': Colors.white},
-  ];
+  List<Map<String, dynamic>> _statusList = [];
 
-  void _addStatus() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ステータス追加は今後実装予定です')),
+  @override
+  void initState() {
+    super.initState();
+    _loadStatuses();
+  }
+
+  // ===== データ読込 =====
+  Future<void> _loadStatuses() async {
+    final db = await DatabaseHelper.instance.database;
+    final result = await db.query('status', orderBy: 'id ASC');
+    setState(() => _statusList = result);
+  }
+
+  // ===== ステータス追加 =====
+  Future<void> _addStatusDialog() async {
+    String newName = '';
+    String? selectedColorCode;
+
+    // ✅ カスタムステータス数チェック
+    final customCount = _statusList.where((s) => !isFixedStatus(s['color_code'] as String)).length;
+    if (customCount >= 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('追加できるステータスは最大4件までです')),
+      );
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setInnerState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1C1C1E),
+              title: const Text(
+                '新しいステータスを追加',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ステータス名入力欄
+                  TextField(
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: 'ステータス名を入力',
+                      hintStyle: TextStyle(color: Color(0x66FFFFFF)),
+                      enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0x33FFFFFF)),
+                      ),
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFFFFFFFF)),
+                      ),
+                    ),
+                    onChanged: (val) => newName = val.trim(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // const Text('カラー選択：',
+                  //     style: TextStyle(color: Colors.white, fontSize: 14)),
+                  // const SizedBox(height: 8),
+
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: kStatusColorPalette.map((colorMap) {
+                      final code = colorMap['code'];
+                      final color = (colorMap['color'] ?? Colors.grey) as Color;
+                      final isSelected = selectedColorCode == code;
+                      return GestureDetector(
+                        onTap: () {
+                          setInnerState(() => selectedColorCode = code);
+                        },
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: isSelected
+                                ? Border.all(color: Colors.white, width: 3)
+                                : null,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('キャンセル', style: TextStyle(color: Colors.grey)),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (newName.isNotEmpty && selectedColorCode != null) {
+                      final db = await DatabaseHelper.instance.database;
+                      await db.insert('status', {
+                        'name': newName,
+                        'color_code': selectedColorCode,
+                      });
+                      Navigator.pop(context);
+                      await _loadStatuses();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('「$newName」を追加しました')),
+                      );
+                    }
+                  },
+                  child: const Text('追加', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
+  // ===== ステータス削除 =====
+  Future<void> _deleteStatus(int id, String name, String colorCode) async {
+    if (isFixedStatus(colorCode)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('固定ステータスは削除できません')),
+      );
+      return;
+    }
+
+    final db = await DatabaseHelper.instance.database;
+    await db.delete('status', where: 'id = ?', whereArgs: [id]);
+    await _loadStatuses();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('「$name」を削除しました')),
+    );
+  }
+
+  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,15 +175,14 @@ class _SettingsDarkState extends State<SettingsDark> {
               ),
               const SizedBox(height: 12),
 
-              // 🌞🌙 Display Mode 切替ボタン
               Container(
-                width: double.infinity, // 横幅をStatusバーと同じに
+                width: double.infinity,
                 decoration: BoxDecoration(
                   color: const Color(0xFF373739),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: SegmentedButton<String>(
-                  showSelectedIcon: false, // ✅ チェックマーク非表示
+                  showSelectedIcon: false,
                   segments: [
                     ButtonSegment(
                       value: 'light',
@@ -91,9 +222,7 @@ class _SettingsDarkState extends State<SettingsDark> {
                     setState(() => _displayMode = value.first);
                   },
                   style: ButtonStyle(
-                    // ✅ 枠線を消す！
                     side: WidgetStateProperty.all(BorderSide.none),
-
                     backgroundColor:
                     WidgetStateProperty.resolveWith((states) {
                       if (states.contains(WidgetState.selected)) {
@@ -129,38 +258,64 @@ class _SettingsDarkState extends State<SettingsDark> {
               Column(
                 children: [
                   for (final s in _statusList)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF373739),
-                        borderRadius: BorderRadius.circular(10),
+                    Dismissible(
+                      key: Key(s['id'].toString()),
+                      direction: DismissDirection.endToStart,
+                      confirmDismiss: (_) async {
+                        // ✅ 削除確認（固定は削除不可）
+                        if (isFixedStatus(s['color_code'] as String)) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('固定ステータスは削除できません')),
+                          );
+                          return false;
+                        }
+                        return true;
+                      },
+                      background: Container(
+                        color: Colors.redAccent,
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 24),
+                        child: const Icon(Icons.delete, color: Colors.white),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 28,
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: s['color'],
-                              shape: BoxShape.circle,
+                      onDismissed: (_) => _deleteStatus(
+                        s['id'] as int,
+                        s['name'] as String,
+                        s['color_code'] as String,
+                      ),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF373739),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: getStatusColor(s['color_code']),
+                                shape: BoxShape.circle,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 16),
-                          Text(
-                            s['name'],
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                            const SizedBox(width: 16),
+                            Text(
+                              s['name'],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   GestureDetector(
-                    onTap: _addStatus,
+                    onTap: _addStatusDialog,
                     child: Container(
                       height: 56,
                       decoration: BoxDecoration(
@@ -201,10 +356,10 @@ class _SettingsDarkState extends State<SettingsDark> {
                   color: const Color(0xFF373739),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Row(
+                child: const Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Column(
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
@@ -225,7 +380,7 @@ class _SettingsDarkState extends State<SettingsDark> {
                       ],
                     ),
                     Row(
-                      children: const [
+                      children: [
                         Icon(Icons.circle, color: Color(0xFF007AFF), size: 8),
                         SizedBox(width: 6),
                         Text(
